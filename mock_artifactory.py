@@ -122,6 +122,7 @@ class Config:
 
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
+
     def version_string(self):
         return "mock-artifactory/1.0"
 
