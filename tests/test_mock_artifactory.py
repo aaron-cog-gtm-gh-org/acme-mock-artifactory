@@ -7,6 +7,8 @@ import tempfile
 import threading
 import time
 import unittest
+from contextlib import redirect_stdout
+from io import StringIO
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import mock_artifactory as ma
@@ -61,6 +63,19 @@ def serve(server):
     return server
 
 
+class CapturedStdout(StringIO):
+    def __init__(self, expected):
+        super().__init__()
+        self.expected = expected
+        self.logged = threading.Event()
+
+    def write(self, text):
+        written = super().write(text)
+        if self.expected in self.getvalue():
+            self.logged.set()
+        return written
+
+
 class MockArtifactoryTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -106,6 +121,19 @@ class MockArtifactoryTest(unittest.TestCase):
 
     def repo(self, rel, method="GET", server=None):
         return self.request(ma.REPO_PREFIX + rel, method, server)
+
+    def test_blocked_get_logs_xray_reason(self):
+        rel = BLOCKED + "httpclient-4.5.12.pom"
+        expected = "GET %s%s 403 source=blocked" % (ma.REPO_PREFIX, rel)
+        output = CapturedStdout(expected)
+        with redirect_stdout(output):
+            resp, _ = self.repo(rel)
+            self.assertTrue(output.logged.wait(1))
+
+        self.assertEqual(resp.status, 403)
+        line = next(line for line in output.getvalue().splitlines() if expected in line)
+        self.assertIn("source=blocked", line)
+        self.assertIn("Download blocked by Xray policy 'ACME-Critical-CVE'", line)
 
     def test_blocked_path_returns_403_with_reason_body_and_header(self):
         rel = BLOCKED + "httpclient-4.5.12.pom"

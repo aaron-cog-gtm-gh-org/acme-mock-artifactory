@@ -26,7 +26,7 @@ Other blocklist entries get a generic `ACME-Default-Block` reason with the artif
 Maven 3.9.x prints the reason phrase verbatim:
 `... status code: 403, reason phrase: Download blocked by Xray policy ... (403)`.
 
-Every request is logged as one line on stdout: `<METHOD> <path> <status> source=<central|cache|internal|blocked|local>`.
+Every request is logged as one line on stdout: `<METHOD> <path> <status> source=<central|cache|internal|blocked|local>`; responses with a reason and status >= 400 append ` reason="<reason>"`.
 
 ## Configuration (all optional)
 
