@@ -188,7 +188,8 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         if self.command != "HEAD":
             self.wfile.write(body)
-        log("%s %s %d source=%s" % (self.command, self.path, status, source))
+        reason_suffix = ' reason="%s"' % reason if reason is not None and status >= 400 else ""
+        log("%s %s %d source=%s%s" % (self.command, self.path, status, source, reason_suffix))
 
     @staticmethod
     def _index(cfg):
