@@ -20,6 +20,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 REPO_PREFIX = "/artifactory/maven-virtual/"
 ARTIFACTORY_ID = "acme-artifactory-demo"
+HTTPCLIENT4 = "org/apache/httpcomponents/httpclient/"
 DEFAULTS = {
     "BLOCKLIST": "",
     "INTERNAL_PREFIX": "com/acme/",
@@ -32,6 +33,9 @@ DEFAULTS = {
 }
 # (policy, watch, rule, finding) keyed by blocklist entry; anything else uses the fallback.
 POLICIES = {
+    HTTPCLIENT4: (
+        "ACME-EOL-Components", "acme-maven-virtual", "Block end-of-life components",
+        "Apache HttpClient 4.x is end-of-life; migrate to HttpClient 5.x (org.apache.httpcomponents.client5:httpclient5)"),
     "org/apache/httpcomponents/httpclient/4.5.12/": (
         "ACME-Critical-CVE", "acme-maven-virtual", "Block critical CVEs", "CVE-2020-13956 (Critical)"),
 }
@@ -144,9 +148,10 @@ class Handler(BaseHTTPRequestHandler):
         rel = urllib.parse.unquote(path[len(REPO_PREFIX):])
         if not rel or any(p in ("..", ".") for p in rel.split("/")):
             return self._error(400, "Bad request", "local")
-        for entry in cfg.blocklist:
-            if rel.startswith(entry):
-                return self._error(403, block_reason(entry, rel), "blocked")
+        matches = [entry for entry in cfg.blocklist if rel.startswith(entry)]
+        if matches:
+            entry = max(matches, key=len)
+            return self._error(403, block_reason(entry, rel), "blocked")
         if rel.startswith(cfg.internal_prefix):
             data = self.server.internal.get(rel)
             if data is None:
