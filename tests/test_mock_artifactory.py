@@ -13,7 +13,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import mock_artifactory as ma
 
-BLOCKED = "org/apache/httpcomponents/httpclient/4.5.12/"
+HTTPCLIENT4 = "org/apache/httpcomponents/httpclient/"
+BLOCKED = HTTPCLIENT4 + "4.5.12/"
+CLIENT5_POM = "org/apache/httpcomponents/client5/httpclient5/5.3.1/httpclient5-5.3.1.pom"
 EXPECTED_REASON = (
     "Download blocked by Xray policy 'ACME-Critical-CVE' (watch: acme-maven-virtual). "
     "Artifact org.apache.httpcomponents:httpclient:4.5.12 violates rule 'Block critical CVEs' - "
@@ -28,9 +30,17 @@ def metadata(*versions):
             "<versioning><release>%s</release><versions>%s</versions></versioning></metadata>" % (versions[-1], vs))
 
 
+def eol_reason(version):
+    return ("Download blocked by Xray policy 'ACME-EOL-Components' (watch: acme-maven-virtual). "
+            "Artifact org.apache.httpcomponents:httpclient:%s violates rule 'Block end-of-life components' - "
+            "Apache HttpClient 4.x is end-of-life; migrate to HttpClient 5.x "
+            "(org.apache.httpcomponents.client5:httpclient5). Contact #artifactory-support." % version)
+
+
 class Upstream(BaseHTTPRequestHandler):
     """Stub Maven Central: serves FILES, counts hits per path."""
     FILES = {"/maven2/" + BLOCKED + "httpclient-4.5.12.pom": b"<project>httpclient</project>",
+             "/maven2/" + CLIENT5_POM: b"<project>httpclient5</project>",
              "/maven2/junit/junit/4.13.2/junit-4.13.2.jar": b"PK\x03\x04fake-jar"}
     hits = {}
     protocol_version = "HTTP/1.1"
@@ -122,6 +132,20 @@ class MockArtifactoryTest(unittest.TestCase):
     def repo(self, rel, method="GET", server=None):
         return self.request(ma.REPO_PREFIX + rel, method, server)
 
+    def assert_blocked_response(self, server, rel, expected_reason):
+        expected = "GET %s%s 403 source=blocked" % (ma.REPO_PREFIX, rel)
+        output = CapturedStdout(expected)
+        with redirect_stdout(output):
+            resp, body = self.repo(rel, server=server)
+            self.assertTrue(output.logged.wait(1))
+
+        self.assertEqual(resp.status, 403)
+        self.assertEqual(resp.reason, expected_reason)
+        self.assertEqual(json.loads(body), {"errors": [{"status": 403, "message": expected_reason}]})
+        self.assertEqual(resp.getheader("X-Artifactory-Id"), "acme-artifactory-demo")
+        line = next(line for line in output.getvalue().splitlines() if expected in line)
+        self.assertIn('reason="%s"' % expected_reason, line)
+
     def test_blocked_get_logs_xray_reason(self):
         rel = BLOCKED + "httpclient-4.5.12.pom"
         expected = "GET %s%s 403 source=blocked" % (ma.REPO_PREFIX, rel)
@@ -134,6 +158,29 @@ class MockArtifactoryTest(unittest.TestCase):
         line = next(line for line in output.getvalue().splitlines() if expected in line)
         self.assertIn("source=blocked", line)
         self.assertIn("Download blocked by Xray policy 'ACME-Critical-CVE'", line)
+
+    def test_httpclient4_eol_policy_and_httpclient5_passthrough(self):
+        server = self.start(BLOCKLIST=HTTPCLIENT4)
+        try:
+            for version in ("4.5.12", "4.5.14"):
+                rel = HTTPCLIENT4 + version + "/httpclient-%s.pom" % version
+                self.assert_blocked_response(server, rel, eol_reason(version))
+
+            upstream_path = "/maven2/" + CLIENT5_POM
+            before = Upstream.hits.get(upstream_path, 0)
+            resp, body = self.repo(CLIENT5_POM, server=server)
+            self.assertEqual((resp.status, body), (200, b"<project>httpclient5</project>"))
+            self.assertEqual(Upstream.hits.get(upstream_path, 0), before + 1)
+        finally:
+            stop(server)
+
+    def test_longest_blocklist_prefix_selects_specific_policy(self):
+        server = self.start(BLOCKLIST=HTTPCLIENT4 + "," + BLOCKED)
+        try:
+            self.assert_blocked_response(
+                server, BLOCKED + "httpclient-4.5.12.pom", EXPECTED_REASON)
+        finally:
+            stop(server)
 
     def test_blocked_path_returns_403_with_reason_body_and_header(self):
         rel = BLOCKED + "httpclient-4.5.12.pom"

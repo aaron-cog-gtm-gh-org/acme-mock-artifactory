@@ -16,15 +16,24 @@
 
 Other routes: `GET /` (HTML status page titled "Mock Artifactory (demo simulation)") and `GET /healthz` (`200 ok`).
 
-For the demo blocklist entry `org/apache/httpcomponents/httpclient/4.5.12/` the reason phrase is:
+The demo policies are:
+
+| Blocklist prefix | Policy | Rule / finding |
+|---|---|---|
+| `org/apache/httpcomponents/httpclient/` | `ACME-EOL-Components` | `Block end-of-life components` |
+| `org/apache/httpcomponents/httpclient/4.5.12/` | `ACME-Critical-CVE` | `Block critical CVEs` - `CVE-2020-13956 (Critical)` |
+
+When multiple entries match a path, the longest matching prefix selects the policy. HttpClient 5 artifacts under
+`org/apache/httpcomponents/client5/` are not matched by the HttpClient 4.x block.
+
+For `org/apache/httpcomponents/httpclient/4.5.14/httpclient-4.5.14.pom`, the reason is:
 
 ```
-Download blocked by Xray policy 'ACME-Critical-CVE' (watch: acme-maven-virtual). Artifact org.apache.httpcomponents:httpclient:4.5.12 violates rule 'Block critical CVEs' - CVE-2020-13956 (Critical). Contact #artifactory-support.
+Download blocked by Xray policy 'ACME-EOL-Components' (watch: acme-maven-virtual). Artifact org.apache.httpcomponents:httpclient:4.5.14 violates rule 'Block end-of-life components' - Apache HttpClient 4.x is end-of-life; migrate to HttpClient 5.x (org.apache.httpcomponents.client5:httpclient5). Contact #artifactory-support.
 ```
 
 Other blocklist entries get a generic `ACME-Default-Block` reason with the artifact coordinates derived from the path.
-Maven 3.9.x prints the reason phrase verbatim:
-`... status code: 403, reason phrase: Download blocked by Xray policy ... (403)`.
+GitHub-hosted runners' Maven shows only `HTTP Status: 403`, so the reason is also written to the access log.
 
 Every request is logged as one line on stdout: `<METHOD> <path> <status> source=<central|cache|internal|blocked|local>`; responses with a reason and status >= 400 append ` reason="<reason>"`.
 
@@ -32,7 +41,7 @@ Every request is logged as one line on stdout: `<METHOD> <path> <status> source=
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `BLOCKLIST` | *(empty: nothing blocked)* | Comma-separated repository path prefixes to block, e.g. `org/apache/httpcomponents/httpclient/4.5.12/` |
+| `BLOCKLIST` | *(empty: nothing blocked)* | Comma-separated repository path prefixes to block, e.g. `org/apache/httpcomponents/httpclient/` |
 | `INTERNAL_PREFIX` | `com/acme/` | Paths served from the internal git-backed release repo |
 | `INTERNAL_GIT_URL` | `https://github.com/aaron-cog-gtm-gh-org/acme-commons-http.git` | Git repo holding the Maven layout (unauthenticated fetch) |
 | `INTERNAL_GIT_BRANCH` | `maven-repo` | Branch holding the Maven layout at its root |
@@ -46,14 +55,14 @@ Every request is logged as one line on stdout: `<METHOD> <path> <status> source=
 Without Docker (Python 3.12 and `git` on `PATH`):
 
 ```bash
-CACHE_DIR=/tmp/mock-artifactory BLOCKLIST=org/apache/httpcomponents/httpclient/4.5.12/ python3 mock_artifactory.py
+CACHE_DIR=/tmp/mock-artifactory BLOCKLIST=org/apache/httpcomponents/httpclient/ python3 mock_artifactory.py
 ```
 
 With Docker:
 
 ```bash
 docker build -t acme-mock-artifactory .
-docker run --rm -p 8081:8081 -e BLOCKLIST=org/apache/httpcomponents/httpclient/4.5.12/ acme-mock-artifactory
+docker run --rm -p 8081:8081 -e BLOCKLIST=org/apache/httpcomponents/httpclient/ acme-mock-artifactory
 # or the published image: ghcr.io/aaron-cog-gtm-gh-org/acme-mock-artifactory:latest
 ```
 
